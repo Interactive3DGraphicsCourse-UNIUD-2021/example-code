@@ -73,23 +73,23 @@
 			vec3 cspec;
 			float roughness;
 
-			vec3 FSchlick(float lDoth) {
-				return (cspec + (vec3(1.0)-cspec)*pow(1.0 - lDoth,5.0));
+			vec3 FSchlick(float vDoth, vec3 f0) {
+				return f0 + (vec3(1.0)-f0)*pow(1.0 - vDoth,5.0);
 			}
 
-			float DGGX(float nDoth, float alpha) {
+			float DGGX(float NoH, float alpha) {
+				float alpha2 = alpha * alpha;
+				float k = NoH*NoH * (alpha2 - 1.0) + 1.0;
+    			return alpha2 / (PI * k * k );
+			}
+
+			float G1(float nDotv, float alpha) {
 				float alpha2 = alpha*alpha;
-				float d = nDoth*nDoth*(alpha2-1.0)+1.0;
-				return (  alpha2 / (PI*d*d));
+				return 2.0 * (nDotv / (nDotv + sqrt(alpha2 + (1.0-alpha2)*nDotv*nDotv )));
 			}
 
-			float G1(float dotProduct, float k) {
-				return (dotProduct / (dotProduct*(1.0-k) + k) );
-			}
-
-			float GSmith(float nDotv, float nDotl) {
-					float k = roughness*roughness;
-					return G1(nDotl,k)*G1(nDotv,k);
+			float GSmith(float nDotv, float nDotl, float alpha) {
+				return G1(nDotl,alpha)*G1(nDotv,alpha);
 			}
 
 			void main() {
@@ -112,9 +112,9 @@
 				// texture in sRGB, linearize
 				cspec = pow( cspec, vec3(2.2));
 				roughness = texture2D( roughnessMap, uVv*textureRepeat).r; // no need to linearize roughness map
-
-				vec3 fresnel = FSchlick(lDoth);
-				vec3 BRDF = (vec3(1.0)-fresnel)*cdiff/PI + fresnel*GSmith(nDotv,nDotl)*DGGX(nDoth,roughness*roughness)/
+				vec3 fresnel = FSchlick(vDoth, cspec);
+				float alpha = roughness * roughness;
+				vec3 BRDF = (vec3(1.0)-fresnel)*cdiff/PI + fresnel*GSmith(nDotv,nDotl, alpha)*DGGX(nDoth,alpha)/
 					(4.0*nDotl*nDotv);
 				vec3 outRadiance = PI* clight * nDotl * BRDF;
 				// gamma encode the final value

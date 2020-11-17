@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 	<head>
-		<title>three.js webgl - lights - spotlight</title>
+		<title>three.js webgl - shading with textures</title>
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 		<style>
@@ -34,7 +34,7 @@
 	<body>
 
 		<div id="info">
-			<a href="https://github.com/robertoranon/int3D" target="_blank">Interactive 3D Graphics 2019 code</a> - microfacet shader<br />
+			<a href="https://github.com/robertoranon/int3D" target="_blank">Interactive 3D Graphics 2017 code</a> - shading with textures<br />
 		</div>
 		<script src="libs/three.js"></script>
 		<script src="libs/stats.min.js"></script>
@@ -46,11 +46,13 @@
 		<script type="text/x-glsl" id="vertex">
 		varying vec3 vNormal;
 		varying vec3 vPosition;
+		varying vec2 uVv;
 
 		void main() {
 			vec4 vPos = modelViewMatrix * vec4( position, 1.0 );
 			vPosition = vPos.xyz;
 			vNormal = normalMatrix * normal;
+			uVv = uv;
 			gl_Position = projectionMatrix * vPos;
 		}
 		</script>
@@ -58,29 +60,36 @@
 		<script type="text/x-glsl" id="fragment">
 			varying vec3 vNormal;
 			varying vec3 vPosition;
+			varying vec2 uVv;
 			uniform vec3 pointLightPosition; // in world space
 			uniform vec3 clight;
-			uniform vec3 cspec;  // f0
-			uniform float roughness;
+			uniform sampler2D specularMap;
+			uniform sampler2D diffuseMap;
+			uniform sampler2D roughnessMap;
+			uniform vec2 textureRepeat;
 			const float PI = 3.14159;
 
-			vec3 FSchlick(float vDoth, vec3 f0) {
-				return f0 + (vec3(1.0)-f0)*pow(1.0 - vDoth,5.0);
+			vec3 cdiff;
+			vec3 cspec;
+			float roughness;
+
+			vec3 FSchlick(float lDoth) {
+				return (cspec + (vec3(1.0)-cspec)*pow(1.0 - lDoth,5.0));
 			}
 
-			float DGGX(float NoH, float alpha) {
-				float alpha2 = alpha * alpha;
-				float k = NoH*NoH * (alpha2 - 1.0) + 1.0;
-    			return alpha2 / (PI * k * k );
-			}
-
-			float G1(float nDotv, float alpha) {
+			float DGGX(float nDoth, float alpha) {
 				float alpha2 = alpha*alpha;
-				return 2.0 * (nDotv / (nDotv + sqrt(alpha2 + (1.0-alpha2)*nDotv*nDotv )));
+				float d = nDoth*nDoth*(alpha2-1.0)+1.0;
+				return (  alpha2 / (PI*d*d));
 			}
 
-			float GSmith(float nDotv, float nDotl, float alpha) {
-				return G1(nDotl,alpha)*G1(nDotv,alpha);
+			float G1(float dotProduct, float k) {
+				return (dotProduct / (dotProduct*(1.0-k) + k) );
+			}
+
+			float GSmith(float nDotv, float nDotl) {
+					float k = roughness*roughness;
+					return G1(nDotl,k)*G1(nDotv,k);
 			}
 
 			void main() {
@@ -90,14 +99,24 @@
 				vec3 v = normalize( -vPosition);
 				vec3 h = normalize( v + l);
 				// small quantity to prevent divisions by 0
-				float nDotl = max(dot( n, l ),0.00001);
-				float lDoth = max(dot( l, h ),0.00001);
-				float nDoth = max(dot( n, h ),0.00001);
-				float vDoth = max(dot( v, h ),0.00001);
-				float nDotv = max(dot( n, v ),0.00001);
-				float alpha = roughness * roughness; // as in UE4 
-				vec3 specularBRDF = FSchlick(vDoth, cspec)*GSmith(nDotv,nDotl, alpha)*DGGX(nDoth,alpha)/(4.0*nDotl*nDotv);
-				vec3 outRadiance = PI* clight * nDotl * specularBRDF;
+				float nDotl = max(dot( n, l ),0.000001);
+				float lDoth = max(dot( l, h ),0.000001);
+				float nDoth = max(dot( n, h ),0.000001);
+				float vDoth = max(dot( v, h ),0.000001);
+				float nDotv = max(dot( n, v ),0.000001);
+
+				cdiff = texture2D( diffuseMap, uVv*textureRepeat ).rgb;
+				// texture in sRGB, linearize
+				cdiff = pow( cdiff, vec3(2.2));
+				cspec = texture2D( specularMap, uVv*textureRepeat ).rgb;
+				// texture in sRGB, linearize
+				cspec = pow( cspec, vec3(2.2));
+				roughness = texture2D( roughnessMap, uVv*textureRepeat).r; // no need to linearize roughness map
+
+				vec3 fresnel = FSchlick(lDoth);
+				vec3 BRDF = (vec3(1.0)-fresnel)*cdiff/PI + fresnel*GSmith(nDotv,nDotl)*DGGX(nDoth,roughness*roughness)/
+					(4.0*nDotl*nDotv);
+				vec3 outRadiance = PI* clight * nDotl * BRDF;
 				// gamma encode the final value
 				gl_FragColor = vec4(pow( outRadiance, vec3(1.0/2.2)), 1.0);
 			}
@@ -117,38 +136,58 @@
 				red: 1.0,
 				green: 1.0,
 				blue: 1.0,
-				intensity: 0.5,
+				intensity: 1.0,
 			}
 
-			// default: gold
-			var cspec = {
-				red: 1.0,
-				green: 0.71,
-				blue: 0.29,
-				roughness: 0.1
+			var textureParameters = {
+				material: "Wood_StaggeredFloorPlanks",
+				repeatS: 1.0,
+				repeatT: 1.0,
 			}
+
+			var diffuseMap = loadTexture( "textures/" + textureParameters.material + "_Diffuse.png" );
+			var specularMap = loadTexture( "textures/" + textureParameters.material + "_Specular.png" );
+			var roughnessMap = loadTexture( "textures/" + textureParameters.material + "_Roughness.png" );
 
 			var uniforms = {
-						cspec:	{ type: "v3", value: new THREE.Vector3() },
-						roughness: {type: "f", value: 0.1},
+						specularMap: { type: "t", value: specularMap},
+						diffuseMap:	{ type: "t", value: diffuseMap},
+						roughnessMap:	{ type: "t", value: roughnessMap},
 						pointLightPosition:	{ type: "v3", value: new THREE.Vector3() },
 						clight:	{ type: "v3", value: new THREE.Vector3() },
+						textureRepeat: { type: "v2", value: new THREE.Vector2(1,1) }
 					};
 
 			vs = document.getElementById("vertex").textContent;
 			fs = document.getElementById("fragment").textContent;
 
-			ourMaterial = new THREE.ShaderMaterial({ uniforms: uniforms, vertexShader: vs, fragmentShader: fs });
-			geometry = new THREE.TorusKnotGeometry( 2, 0.5, 200, 32 );
+			var ourMaterial = new THREE.ShaderMaterial({ uniforms: uniforms, vertexShader: vs, fragmentShader: fs });
+			//var ourMaterial = new THREE.MeshBasicMaterial({ map: diffuseMap });
+			geometry = new THREE.SphereBufferGeometry( 2, 32, 32 );
 			var mesh = new THREE.Mesh( geometry, ourMaterial );
 
 			var lightMesh = new THREE.Mesh( new THREE.SphereGeometry( 1, 16, 16),
-				new THREE.MeshBasicMaterial ({color: 0xffff00, wireframe:true}));
+			new THREE.MeshBasicMaterial ({color: 0xffff00, wireframe:true}));
 			lightMesh.position.set( 7.0, 7.0, 7.0 );
-			uniforms.pointLightPosition.value = new THREE.Vector3(lightMesh.position.x, lightMesh.position.y, lightMesh.position.z);
+			uniforms.pointLightPosition.value = new THREE.Vector3(lightMesh.position.x,
+																														lightMesh.position.y,
+																														lightMesh.position.z);
 
 			var gui;
 			var stats = new Stats();
+
+			function loadTexture(file) {
+					var texture = new THREE.TextureLoader().load( file , function ( texture ) {
+
+						texture.minFilter = THREE.LinearMipMapLinearFilter;
+						texture.anisotropy = renderer.getMaxAnisotropy();
+						texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    			  		texture.offset.set( 0, 0 );
+						texture.needsUpdate = true;
+						render();
+					} )
+					return texture;
+			}
 
 			function init() {
 
@@ -178,6 +217,8 @@
 			  stats.domElement.style.position = 'absolute';
 			  stats.domElement.style.top = '0px';
 			  document.body.appendChild( stats.domElement );
+
+				ourMaterial.needsUpdate = true;
 
 			}
 
@@ -217,21 +258,29 @@
 				lightSettings.add(lightParameters,'blue').min(0).max(1).onChange( function(newVal) { render() });
 				lightSettings.add(lightParameters,'intensity').min(0).max(10000).onChange( function(newVal) { render() });
 
-				materialSettings = gui.addFolder('material settings');
-				materialSettings.add(cspec,'red').min(0).max(1).onChange( function(newVal) { render() });
-				materialSettings.add(cspec,'green').min(0).max(1).onChange( function(newVal) { render() });
-				materialSettings.add(cspec,'blue').min(0).max(1).onChange( function(newVal) { render() });
-				materialSettings.add(cspec,'roughness').min(0).max(1).onChange( function(newVal) { render() });
-			}
+				textureSettings = gui.addFolder('Texture parameters');
+				textureSettings.add(textureParameters,'material',[ 'Wood_StaggeredFloorPlanks', 'Misc_SolarPanelLarge', 'Concrete_RockyFoundation',
+			    'Metal_ThickGrating' ]).onChange(
+					function( newVal ) {
+						diffuseMap = loadTexture( "textures/" + newVal + "_Diffuse.png" );
+						specularMap = loadTexture( "textures/" + newVal + "_Specular.png" );
+						roughnessMap = loadTexture( "textures/" + newVal + "_Roughness.png" );
+						ourMaterial.needsUpdate = true;
+					render()});
+				textureSettings.add(textureParameters,'repeatS').min(0.1).max(10).onChange( function( newVal ) {render()});
+				textureSettings.add(textureParameters,'repeatT').min(0.1).max(10).onChange( function( newVal ) {render()});
+				}
 
 			function updateUniforms() {
 
-					uniforms.cspec.value = new THREE.Vector3(cspec.red,cspec.green,cspec.blue);
-					uniforms.roughness.value = cspec.roughness>0.0?cspec.roughness:0.01;
 					uniforms.clight.value = new THREE.Vector3(
-							lightParameters.red * lightParameters.intensity,
-					    lightParameters.green * lightParameters.intensity,
-							lightParameters.blue * lightParameters.intensity);
+					lightParameters.red * lightParameters.intensity,
+					lightParameters.green * lightParameters.intensity,
+					lightParameters.blue * lightParameters.intensity);
+					uniforms.textureRepeat.value = new THREE.Vector2( textureParameters.repeatS, textureParameters.repeatT);
+					uniforms.diffuseMap.value = diffuseMap;
+					uniforms.specularMap.value = specularMap;
+					uniforms.roughnessMap.value = roughnessMap;
 			}
 
 			init();

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 	<head>
-		<title>three.js webgl - lights - spotlight</title>
+		<title>three.js webgl - normal mapping</title>
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 		<style>
@@ -34,34 +34,53 @@
 	<body>
 
 		<div id="info">
-			<a href="https://github.com/robertoranon/int3D" target="_blank">Interactive 3D Graphics 2019 code</a> - microfacet shader<br />
+			<a href="https://github.com/robertoranon/int3D" target="_blank">Interactive 3D Graphics 2017 code</a> - normal mapping<br />
 		</div>
 		<script src="libs/three.js"></script>
 		<script src="libs/stats.min.js"></script>
 		<script src="libs/OrbitControls.js"></script>
 		<script src='libs/dat.gui.min.js'></script>
+		<script src='libs/GLTFLoader.js'></script>
+		
+		<script src='libs/BufferGeometryUtils.js'></script>
 
 		<!-- shaders -->
 
 		<script type="text/x-glsl" id="vertex">
+		attribute vec4 tangent;
 		varying vec3 vNormal;
 		varying vec3 vPosition;
+		varying vec2 vUv;
+		varying vec3 vTangent;
+		varying vec3 vBitangent;
 
 		void main() {
 			vec4 vPos = modelViewMatrix * vec4( position, 1.0 );
 			vPosition = vPos.xyz;
-			vNormal = normalMatrix * normal;
+			vNormal = normalize(normalMatrix * normal);
+			vec3 objectTangent = vec3( tangent.xyz );
+			vec3 transformedTangent = normalMatrix * objectTangent;
+			vTangent = normalize( transformedTangent );
+			// w is 1 or -1 depending on the sign of det( M tangent )
+			vBitangent = normalize( cross( vNormal, vTangent ) * tangent.w );
+			vUv = uv;
 			gl_Position = projectionMatrix * vPos;
 		}
 		</script>
 
 		<script type="text/x-glsl" id="fragment">
 			varying vec3 vNormal;
+			varying vec3 vTangent;
+			varying vec3 vBitangent;
 			varying vec3 vPosition;
+			varying vec2 vUv;
 			uniform vec3 pointLightPosition; // in world space
 			uniform vec3 clight;
-			uniform vec3 cspec;  // f0
+			uniform vec3 cspec;
+			uniform vec3 cdiff;
 			uniform float roughness;
+			uniform sampler2D normalMap;
+			uniform vec2 normalScale;
 			const float PI = 3.14159;
 
 			vec3 FSchlick(float vDoth, vec3 f0) {
@@ -83,21 +102,31 @@
 				return G1(nDotl,alpha)*G1(nDotv,alpha);
 			}
 
+
 			void main() {
 				vec4 lPosition = viewMatrix * vec4( pointLightPosition, 1.0 );
 				vec3 l = normalize(lPosition.xyz - vPosition.xyz);
-				vec3 n = normalize( vNormal );  // interpolation destroys normalization, so we have to normalize
+				vec3 normal = normalize( vNormal );
+				vec3 tangent = normalize( vTangent );
+				vec3 bitangent = normalize( vBitangent );
+				// matrix to convert bewtween tangent space and view space
+				mat3 vTBN = mat3( tangent, bitangent, normal );
+				vec3 mapN = texture2D( normalMap, vUv ).xyz * 2.0 - 1.0;
+				//mapN.xy = normalScale * mapN.xy;
+				vec3 n = normalize( vTBN * mapN );
 				vec3 v = normalize( -vPosition);
 				vec3 h = normalize( v + l);
 				// small quantity to prevent divisions by 0
-				float nDotl = max(dot( n, l ),0.00001);
-				float lDoth = max(dot( l, h ),0.00001);
-				float nDoth = max(dot( n, h ),0.00001);
-				float vDoth = max(dot( v, h ),0.00001);
-				float nDotv = max(dot( n, v ),0.00001);
-				float alpha = roughness * roughness; // as in UE4 
-				vec3 specularBRDF = FSchlick(vDoth, cspec)*GSmith(nDotv,nDotl, alpha)*DGGX(nDoth,alpha)/(4.0*nDotl*nDotv);
-				vec3 outRadiance = PI* clight * nDotl * specularBRDF;
+				float nDotl = max(dot( n, l ),0.000001);
+				float lDoth = max(dot( l, h ),0.000001);
+				float nDoth = max(dot( n, h ),0.000001);
+				float vDoth = max(dot( v, h ),0.000001);
+				float nDotv = max(dot( n, v ),0.000001);
+				vec3 fresnel = FSchlick(vDoth, cspec);
+				float alpha = roughness * roughness;
+				vec3 BRDF = (vec3(1.0)-fresnel)*cdiff/PI + fresnel*GSmith(nDotv,nDotl, alpha)*DGGX(nDoth,alpha)/
+					(4.0*nDotl*nDotv);
+				vec3 outRadiance = PI* clight * nDotl * BRDF;
 				// gamma encode the final value
 				gl_FragColor = vec4(pow( outRadiance, vec3(1.0/2.2)), 1.0);
 			}
@@ -117,67 +146,94 @@
 				red: 1.0,
 				green: 1.0,
 				blue: 1.0,
-				intensity: 0.5,
+				intensity: 1.0,
 			}
 
-			// default: gold
-			var cspec = {
-				red: 1.0,
-				green: 0.71,
-				blue: 0.29,
-				roughness: 0.1
+			var textureParameters = {
+				normalScale: 0.0,
 			}
+
+			var normalMap = loadTexture( "textures/normal.jpg" );
 
 			var uniforms = {
-						cspec:	{ type: "v3", value: new THREE.Vector3() },
-						roughness: {type: "f", value: 0.1},
-						pointLightPosition:	{ type: "v3", value: new THREE.Vector3() },
-						clight:	{ type: "v3", value: new THREE.Vector3() },
+				    cspec:	{ type: "v3", value: new THREE.Vector3(0.04,0.04,0.04) },
+				    cdiff:	{ type: "v3", value: new THREE.Vector3(0.8,0.8,0.8) },
+				    roughness: {type: "f", value: 0.2},
+					normalMap:	{ type: "t", value: normalMap},
+					normalScale: {type: "v2", value: new THREE.Vector2(1,1)},
+					pointLightPosition:	{ type: "v3", value: new THREE.Vector3() },
+					clight:	{ type: "v3", value: new THREE.Vector3() },
 					};
 
 			vs = document.getElementById("vertex").textContent;
 			fs = document.getElementById("fragment").textContent;
 
-			ourMaterial = new THREE.ShaderMaterial({ uniforms: uniforms, vertexShader: vs, fragmentShader: fs });
-			geometry = new THREE.TorusKnotGeometry( 2, 0.5, 200, 32 );
-			var mesh = new THREE.Mesh( geometry, ourMaterial );
+			var ourMaterial = new THREE.ShaderMaterial({ uniforms: uniforms, vertexShader: vs, fragmentShader: fs });
+			ourMaterial.vertexTangents = true;
+			ourMaterial.needsUpdate = true;
+			console.log(ourMaterial);
+
+			var loader = new THREE.GLTFLoader();
+			loader.useIndices = true;
+				loader.load( "models/ninjaHead_Low.glb", function ( model ) {
+					console.log(model);
+					geometry = model.scene.children[ 0 ].children[0].geometry;
+					//geometry = obj.children[0].geometry;
+					geometry.center();
+					mesh = new THREE.Mesh( geometry, ourMaterial );
+					mesh.scale.multiplyScalar( 0.1 );
+					THREE.BufferGeometryUtils.computeTangents(geometry);
+					scene.add( mesh );
+				} );
 
 			var lightMesh = new THREE.Mesh( new THREE.SphereGeometry( 1, 16, 16),
-				new THREE.MeshBasicMaterial ({color: 0xffff00, wireframe:true}));
+			new THREE.MeshBasicMaterial ({color: 0xffff00, wireframe:true}));
 			lightMesh.position.set( 7.0, 7.0, 7.0 );
-			uniforms.pointLightPosition.value = new THREE.Vector3(lightMesh.position.x, lightMesh.position.y, lightMesh.position.z);
+			uniforms.pointLightPosition.value = new THREE.Vector3(lightMesh.position.x,
+																														lightMesh.position.y,
+																														lightMesh.position.z);
 
 			var gui;
 			var stats = new Stats();
+
+			function loadTexture(file) {
+					var texture = new THREE.TextureLoader().load( file , function ( texture ) {
+
+						texture.minFilter = THREE.LinearMipMapLinearFilter;
+						texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+						texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    			  		texture.offset.set( 0, 0 );
+						texture.needsUpdate = true;
+						render();
+					} )
+					return texture;
+			}
 
 			function init() {
 
 				renderer.setClearColor( 0xf0f0f0 );
 
-				camera.position.set( 0, 10, 10 );
+				camera.position.set( 0, 0, 10 );
 				scene.add( camera );
-
-				scene.add( mesh );
 				scene.add(lightMesh);
 
 				document.body.appendChild( renderer.domElement );
 				renderer.setPixelRatio( window.devicePixelRatio );
 				renderer.setSize( window.innerWidth, window.innerHeight );
 
-				controls.addEventListener( 'change', render );
+				//controls.addEventListener( 'change', render );
 				controls.minDistance = 1;
 				controls.maxDistance = 100;
-				//controls.maxPolarAngle = Math.PI / 2;
 				controls.enablePan = false;
-				controls.target.copy( mesh.position );
 				controls.update();
 
 				window.addEventListener( 'resize', onResize, false );
 
+			  	stats.domElement.style.position = 'absolute';
+			  	stats.domElement.style.top = '0px';
+			  	document.body.appendChild( stats.domElement );
 
-			  stats.domElement.style.position = 'absolute';
-			  stats.domElement.style.top = '0px';
-			  document.body.appendChild( stats.domElement );
+				
 
 			}
 
@@ -192,6 +248,7 @@
 			function update() {
 				requestAnimationFrame( update );
 				stats.update();
+				render();
 			}
 
 			function render() {
@@ -217,21 +274,18 @@
 				lightSettings.add(lightParameters,'blue').min(0).max(1).onChange( function(newVal) { render() });
 				lightSettings.add(lightParameters,'intensity').min(0).max(10000).onChange( function(newVal) { render() });
 
-				materialSettings = gui.addFolder('material settings');
-				materialSettings.add(cspec,'red').min(0).max(1).onChange( function(newVal) { render() });
-				materialSettings.add(cspec,'green').min(0).max(1).onChange( function(newVal) { render() });
-				materialSettings.add(cspec,'blue').min(0).max(1).onChange( function(newVal) { render() });
-				materialSettings.add(cspec,'roughness').min(0).max(1).onChange( function(newVal) { render() });
-			}
+				textureSettings = gui.addFolder('Texture parameters');
+				textureSettings.add(textureParameters,'normalScale').min(-3).max(3).onChange( function( newVal ) {render()});
+				}
 
 			function updateUniforms() {
 
-					uniforms.cspec.value = new THREE.Vector3(cspec.red,cspec.green,cspec.blue);
-					uniforms.roughness.value = cspec.roughness>0.0?cspec.roughness:0.01;
-					uniforms.clight.value = new THREE.Vector3(
+							uniforms.clight.value = new THREE.Vector3(
 							lightParameters.red * lightParameters.intensity,
 					    lightParameters.green * lightParameters.intensity,
 							lightParameters.blue * lightParameters.intensity);
+							uniforms.normalScale.value = new THREE.Vector2( textureParameters.normalScale, textureParameters.normalScale );
+
 			}
 
 			init();

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 	<head>
-		<title>three.js webgl - shading with AO map</title>
+		<title>three.js webgl - reflection mapping</title>
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 		<style>
@@ -33,8 +33,8 @@
 	</head>
 	<body>
 
-		<div id="info">
-			<a href="https://github.com/robertoranon/int3D" target="_blank">Interactive 3D Graphics 2017 code</a> - shading with AO maps<br />
+		<div id="info" style="color: white">
+			<a href="https://github.com/robertoranon/int3D" target="_blank" style="color: white">Interactive 3D Graphics 2021 code</a> - reflection mapping<br />
 		</div>
 		<script src="libs/three.js"></script>
 		<script src="libs/stats.min.js"></script>
@@ -50,13 +50,15 @@
 		attribute vec4 tangent;
 		varying vec3 vNormal;
 		varying vec3 vPosition;
-		varying vec2 vUv;
+		varying vec3 wPosition;
 		varying vec3 vTangent;
 		varying vec3 vBitangent;
+		varying vec2 vUv;
 
 		void main() {
 			vec4 vPos = modelViewMatrix * vec4( position, 1.0 );
 			vPosition = vPos.xyz;
+			wPosition = (modelMatrix * vec4( position, 1.0 )).xyz;
 			vNormal = normalize(normalMatrix * normal);
 			vec3 objectTangent = vec3( tangent.xyz );
 			vec3 transformedTangent = normalMatrix * objectTangent;
@@ -72,15 +74,11 @@
 			varying vec3 vTangent;
 			varying vec3 vBitangent;
 			varying vec3 vPosition;
+			varying vec3 wPosition;
 			varying vec2 vUv;
-			uniform vec3 pointLightPosition; // in world space
-			uniform vec3 clight;
-			uniform vec3 ambientLight;
 			uniform vec3 cspec;
-			uniform vec3 cdiff;
-			uniform float roughness;
 			uniform sampler2D normalMap;
-			uniform sampler2D aoMap;
+			uniform samplerCube envMap;
 			uniform vec2 normalScale;
 			const float PI = 3.14159;
 
@@ -88,47 +86,33 @@
 				return f0 + (vec3(1.0)-f0)*pow(1.0 - vDoth,5.0);
 			}
 
-			float DGGX(float NoH, float alpha) {
-				float alpha2 = alpha * alpha;
-				float k = NoH*NoH * (alpha2 - 1.0) + 1.0;
-    			return alpha2 / (PI * k * k );
-			}
-
-			float G1(float nDotv, float alpha) {
-				float alpha2 = alpha*alpha;
-				return 2.0 * (nDotv / (nDotv + sqrt(alpha2 + (1.0-alpha2)*nDotv*nDotv )));
-			}
-
-			float GSmith(float nDotv, float nDotl, float alpha) {
-				return G1(nDotl,alpha)*G1(nDotv,alpha);
-			}
-
-
 		
 
+		// http://en.wikibooks.org/wiki/GLSL_Programming/Applying_Matrix_Transformations
+		vec3 inverseTransformDirection( in vec3 dir, in mat4 matrix ) {
+			return normalize( ( vec4( dir, 0.0 ) * matrix ).xyz );
+		}
+
 			void main() {
-				vec4 lPosition = viewMatrix * vec4( pointLightPosition, 1.0 );
-				vec3 l = normalize(lPosition.xyz - vPosition.xyz);
 				vec3 normal = normalize( vNormal );
 				vec3 tangent = normalize( vTangent );
 				vec3 bitangent = normalize( vBitangent );
 				mat3 vTBN = mat3( tangent, bitangent, normal );
 				vec3 mapN = texture2D( normalMap, vUv ).xyz * 2.0 - 1.0;
-				//mapN.xy = normalScale * mapN.xy;
+				mapN.xy = normalScale * mapN.xy;
 				vec3 n = normalize( vTBN * mapN );
 				vec3 v = normalize( -vPosition);
-				vec3 h = normalize( v + l);
+				vec3 worldN = inverseTransformDirection( n, viewMatrix );
+				vec3 worldV = cameraPosition - wPosition ;
+				vec3 r = normalize( reflect(-worldV,worldN));
 				// small quantity to prevent divisions by 0
-				float nDotl = max(dot( n, l ),0.000001);
-				float lDoth = max(dot( l, h ),0.000001);
-				float nDoth = max(dot( n, h ),0.000001);
-				float vDoth = max(dot( v, h ),0.000001);
 				float nDotv = max(dot( n, v ),0.000001);
-				vec3 fresnel = FSchlick(vDoth, cspec);
-				float alpha = roughness * roughness;
-				vec3 BRDF = (vec3(1.0)-fresnel)*cdiff/PI + fresnel*GSmith(nDotv,nDotl, alpha)*DGGX(nDoth,alpha)/
-					(4.0*nDotl*nDotv);
-				vec3 outRadiance = PI* clight * nDotl * BRDF + ambientLight*cdiff*texture2D( aoMap, vUv ).xyz;
+				vec3 fresnel = FSchlick(nDotv, cspec);
+				// negate x to account for how cubemap is displayed on background
+				vec3 envLight = textureCube( envMap, vec3(-r.x, r.yz)).rgb;
+				// texture in sRGB, linearize
+				envLight = pow( envLight, vec3(2.2));
+				vec3 outRadiance = fresnel*envLight;
 				// gamma encode the final value
 				gl_FragColor = vec4(pow( outRadiance, vec3(1.0/2.2)), 1.0);
 			}
@@ -143,47 +127,34 @@
 			var controls = new THREE.OrbitControls( camera, renderer.domElement );
 			var scene = new THREE.Scene();
 
-			// default: white, 1.0 intensity
-			var lightParameters = {
-				red: 1.0,
-				green: 1.0,
-				blue: 1.0,
-				intensity: 1.0,
-			}
-
-			var ambientLightParameters = {
-				red: 0.2,
-				green: 0.2,
-				blue: 0.2,
-				intensity: 1.0,
-			}
-
 			var textureParameters = {
 				normalScale: 0.0,
 			}
 
 			var normalMap = loadTexture( "textures/normal.jpg" );
-			var aoMap = loadTexture("textures/ao.jpg");
+
+			var loader = new THREE.CubeTextureLoader();
+				loader.setPath( 'textures/SwedishRoyalCastle/' );
+
+				var textureCube = loader.load( [
+					'px.png', 'nx.png',
+					'py.png', 'ny.png',
+					'pz.png', 'nz.png'
+				] );
+
+			scene.background = textureCube;
 
 			var uniforms = {
-				    cspec:	{ type: "v3", value: new THREE.Vector3(0.04,0.04,0.04) },
-				    cdiff:	{ type: "v3", value: new THREE.Vector3(0.8,0.8,0.8) },
-				    roughness: {type: "f", value: 0.2},
-					  normalMap:	{ type: "t", value: normalMap},
-						aoMap:	{ type: "t", value: aoMap},
-						normalScale: {type: "v2", value: new THREE.Vector2(1,1)},
-						pointLightPosition:	{ type: "v3", value: new THREE.Vector3() },
-						clight:	{ type: "v3", value: new THREE.Vector3() },
-						ambientLight:	{ type: "v3", value: new THREE.Vector3() },
-					};
+				    cspec:	{ type: "v3", value: new THREE.Vector3(0.8,0.8,0.8) },
+				    normalMap:	{ type: "t", value: normalMap},
+					normalScale: {type: "v2", value: new THREE.Vector2(1,1)},
+					envMap:	{ type: "t", value: textureCube},
+			};
 
 			vs = document.getElementById("vertex").textContent;
 			fs = document.getElementById("fragment").textContent;
 
 			var ourMaterial = new THREE.ShaderMaterial({ uniforms: uniforms, vertexShader: vs, fragmentShader: fs });
-			ourMaterial.vertexTangents = true;
-			ourMaterial.needsUpdate = true;
-			
 
 			var loader = new THREE.GLTFLoader();
 			loader.useIndices = true;
@@ -197,13 +168,6 @@
 					THREE.BufferGeometryUtils.computeTangents(geometry);
 					scene.add( mesh );
 				} );
-
-			var lightMesh = new THREE.Mesh( new THREE.SphereGeometry( 1, 16, 16),
-				new THREE.MeshBasicMaterial ({color: 0xffff00, wireframe:true}));
-			lightMesh.position.set( 7.0, 7.0, 7.0 );
-			uniforms.pointLightPosition.value = new THREE.Vector3(lightMesh.position.x,
-																														lightMesh.position.y,
-																														lightMesh.position.z);
 
 			var gui;
 			var stats = new Stats();
@@ -227,7 +191,6 @@
 
 				camera.position.set( 0, 0, 10 );
 				scene.add( camera );
-				scene.add(lightMesh);
 
 				document.body.appendChild( renderer.domElement );
 				renderer.setPixelRatio( window.devicePixelRatio );
@@ -245,6 +208,8 @@
 			  document.body.appendChild( stats.domElement );
 
 				ourMaterial.needsUpdate = true;
+
+
 
 			}
 
@@ -279,33 +244,13 @@
 			function buildGui() {
 
 				clearGui();
-				lightSettings = gui.addFolder('Light Parameters');
-				lightSettings.add(lightParameters,'red').min(0).max(1).onChange( function(newVal) { render() });
-				lightSettings.add(lightParameters,'green').min(0).max(1).onChange( function(newVal) { render() });
-				lightSettings.add(lightParameters,'blue').min(0).max(1).onChange( function(newVal) { render() });
-				lightSettings.add(lightParameters,'intensity').min(0).max(10000).onChange( function(newVal) { render() });
 
-				ambientLightSettings = gui.addFolder('Ambient Light Parameters');
-				ambientLightSettings.add(ambientLightParameters,'red').min(0).max(1).onChange( function(newVal) { render() });
-				ambientLightSettings.add(ambientLightParameters,'green').min(0).max(1).onChange( function(newVal) { render() });
-				ambientLightSettings.add(ambientLightParameters,'blue').min(0).max(1).onChange( function(newVal) { render() });
-				ambientLightSettings.add(ambientLightParameters,'intensity').min(0).max(100).onChange( function(newVal) { render() });
-
-
-				textureSettings = gui.addFolder('Texture parameters');
-				textureSettings.add(textureParameters,'normalScale').min(-3).max(3).onChange( function( newVal ) {render()});
+				gui.add(textureParameters,'normalScale').min(-3).max(3).onChange( function( newVal ) {render()});
 				}
 
 			function updateUniforms() {
 
-					uniforms.clight.value = new THREE.Vector3(
-							lightParameters.red * lightParameters.intensity,
-					    lightParameters.green * lightParameters.intensity,
-							lightParameters.blue * lightParameters.intensity);
-					uniforms.ambientLight.value = new THREE.Vector3(
-							ambientLightParameters.red * ambientLightParameters.intensity,
-							ambientLightParameters.green * ambientLightParameters.intensity,
-							ambientLightParameters.blue * ambientLightParameters.intensity);
+
 
 					uniforms.normalScale.value = new THREE.Vector2( textureParameters.normalScale, textureParameters.normalScale );
 

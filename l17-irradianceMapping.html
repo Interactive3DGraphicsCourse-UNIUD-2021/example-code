@@ -99,10 +99,7 @@
 				vec3 n = normalize( vTBN * mapN );
 				vec3 v = normalize( -vPosition);
 				vec3 worldN = inverseTransformDirection( n, viewMatrix );
-				vec3 worldV = cameraPosition - wPosition ;
-				vec3 r = normalize( reflect(-worldV,worldN));
-				// small quantity to prevent divisions by 0
-				float nDotv = max(dot( n, v ),0.000001);
+				
 				// negate x to account for how cubemap is displayed on background
 				vec3 irradiance = textureCube( irradianceMap, worldN).rgb;
 				// texture in sRGB, linearize

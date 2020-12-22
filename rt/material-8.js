@@ -14,6 +14,9 @@ export class Material {
         return p;
     }
 
+    // given incoming ray r, returns reflected ray scattered with attenuation factor attenuation
+    scatter(r, attenuation, hitRecord, scattered) { }
+
 }
 
 

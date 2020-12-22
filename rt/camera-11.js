@@ -11,7 +11,7 @@ export class Camera {
         const u = new THREE.Vector3().crossVectors(vup, w);
         const v = new THREE.Vector3().crossVectors(w, u);
         this.lowerLeftCorner = new THREE.Vector3().copy(this.origin).sub( u.clone().multiplyScalar(halfWidth) ).
-            sub(v.clone().multiplyScalar(halfHeight)).sub(w);
+            sub(v.clone().multiplyScalar(halfHeight)).sub(w);  // lowerLeftCorner = origin - halfWidth*u - halfHeight*v - w
 
         this.horizontal = u.clone().multiplyScalar(2*halfWidth);
         this.vertical =  v.clone().multiplyScalar(2*halfHeight);

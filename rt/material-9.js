@@ -46,11 +46,11 @@ export class LambertianMaterial extends Material {
 
 export class MetalMaterial extends Material {
 
-    constructor ( albedo, fuzziness ) { 
+    constructor ( albedo, roughness ) { 
 
         super();
         this.albedo = albedo;
-        this.fuzziness = fuzziness;
+        this.roughness = roughness;
 
     }
 
@@ -59,8 +59,8 @@ export class MetalMaterial extends Material {
         const reflected = r.dir.reflect( hitRecord.n );
         scattered.origin = hitRecord.p;
         scattered.dir = reflected;
-        if (this.fuzziness > 0) {
-            scattered.dir.add( this.randomInUnitSphere().multiplyScalar( this.fuzziness ));
+        if (this.roughness > 0) {
+            scattered.dir.add( this.randomInUnitSphere().multiplyScalar( this.roughness ));
         }
         attenuation.setRGB( this.albedo.r, this.albedo.g, this.albedo.b );
 

@@ -56,10 +56,10 @@
         </div>
     <script type="module">
         import { Ray } from './ray-1.js';
-        import { Camera } from './camera-11.js';
+        import { Camera } from './camera-12.js';
         import { Sphere } from './sphere-8.js';
         import { HitRecord} from './hitRecord-8.js';
-        import { Material, LambertianMaterial, MetalMaterial, DielectricMaterial} from './material-10.js';
+        import { Material, LambertianMaterial, MetalMaterial} from './material-9.js';
 
         const scaleFactor = 0.25;
         const aspect = window.innerWidth / window.innerHeight;
@@ -85,13 +85,15 @@
 
         const spheres = [];
 
-        spheres.push( new Sphere( new THREE.Vector3(0,0,-1), 0.5, new LambertianMaterial( new THREE.Color(0.8,0.3,0.3))) );
+       spheres.push( new Sphere( new THREE.Vector3(0,0,-1), 0.5, new LambertianMaterial( new THREE.Color(0.8,0.3,0.3))) );
         spheres.push( new Sphere( new THREE.Vector3(0,-100.5,-1), 100, new LambertianMaterial( new THREE.Color(0.8,0.8,0))) );
         spheres.push( new Sphere( new THREE.Vector3(1,0,-1), 0.5, new MetalMaterial( new THREE.Color(0.8,0.6,0.2),0.3)) );
-        spheres.push( new Sphere( new THREE.Vector3(-1,0,-1), 0.5, new DielectricMaterial( 1.5) ));
-        spheres.push( new Sphere( new THREE.Vector3(-1,0,-1), -0.45, new DielectricMaterial( 1.5) ));
+        spheres.push( new Sphere( new THREE.Vector3(-1,0,-1), 0.5, new MetalMaterial( new THREE.Color(0.8,0.8,0.8),0.01)) );
 
-        const camera = new Camera( new THREE.Vector3(-2,2,1), new THREE.Vector3(0,0,-1), new THREE.Vector3(0,1,0), 90*Math.PI/180, aspect );
+        const lookFrom = new THREE.Vector3(3,3,2);
+        const lookAt = new THREE.Vector3(0,0,-1);
+        const camera = new Camera( lookFrom, lookAt, new THREE.Vector3(0,1,0), 20*Math.PI/180, 
+            aspect, 2, lookFrom.clone().sub(lookAt).length() );
 
         function hit(r, tmin, tmax, hitRecord) {
             var hitSomething = false;
